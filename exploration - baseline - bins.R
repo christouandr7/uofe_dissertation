@@ -3,6 +3,7 @@ library(readr)
 library(data.table)
 library(fastICA)
 
+#read data (mixtures)
 for (i in c(1:36)){
 	path <- paste("./EMG_data_for_gestures-master", i, "d1.txt", sep = "/")
 	print(path)
@@ -10,11 +11,10 @@ for (i in c(1:36)){
 }
 
 train <- patients_d1[c(1:36)]
-
 train_ics <- vector("list", length = 36)
 unmix_matrices <- vector("list", length = 36)
 
-
+#run fastica on mixtures
 for (i in c(1:36)){
 	
 	mixture_signal <- train[[i]][,2:9]
@@ -30,7 +30,9 @@ for (i in c(1:36)){
 
 
 
-
+#initialize 2 lists - mixtures and ics will be splited into gestures
+#lists will contain the gestures
+#see when gesture label changes during the signal and define it as the end of the gesture
 mixtures_gestures <- vector("list",200)
 ics_gestures <- vector("list",200)
 s <- 0
@@ -58,6 +60,7 @@ for (i in c(1:length(train))){
 }
 
 
+#Windows method - use only the middle 50% of the signal
 length(ics_gestures)
 
 for (i in c(1:length(ics_gestures))){
@@ -67,10 +70,10 @@ for (i in c(1:length(ics_gestures))){
 }
 
 
-
 ##########################################################################
 #CLASS DISTRIBUTION
 
+#count instances for each class
 class_instances <- c(0,0,0,0,0,0,0)
 for (j in c(1:length(mixtures_gestures))){
 	for (i in c(1:7)){
@@ -80,12 +83,14 @@ for (j in c(1:length(mixtures_gestures))){
 	}
 }
 
+#binary problem class distribution
 class_instances[1] <- class_instances[1] + 432
 class_instances_binary <- c(0,0)
 class_instances_binary[1] <- class_instances[1]
 class_instances_binary[2] <- length(mixtures_gestures) - class_instances_binary[1]
 
 
+#create datatable to include the class distribution
 counts <- class_instances
 
 df=data.frame(counts)
@@ -95,6 +100,7 @@ df$rn <- as.integer(df$rn)
 df$rn <- as.character(df$rn)
 colnames(df) <- c("class", "instances")
 
+#plot class distribution for original and binary problems
 library(ggplot2)
 
 par(mfrow = c(1,2))
@@ -125,13 +131,10 @@ grid.arrange(plot1, plot2, ncol = 2)
 
 ##########################################################################
 ##########################################################################
-
-
-
-#### BASELINE #######
+#### BASELINE solution #######
 
 mix_rms_dt_new_baseline <- data.table(mean_rms = numeric(), class = numeric()) 
-
+#for each gesture calculate the rms 
 for (i in c(1:length(mixtures_gestures))){
 	new_record_mix <- 0
 	for (j in c(1:8)){
@@ -139,7 +142,7 @@ for (i in c(1:length(mixtures_gestures))){
 		rms_mix <- sqrt((1/dim(mixtures_gestures[[i]])[1]) * sum(mixtures_gestures[[i]][,get(a)]^2, na.rm = TRUE))
 		new_record_mix = new_record_mix + rms_mix
 	}
-
+	#baseline solution uses the mean rms since the signals are similar
 	mean_rms <- new_record_mix/8
 	class <- mixtures_gestures[[i]]$class[1]
 	df <- data.frame(mean_rms, class)
@@ -148,13 +151,15 @@ for (i in c(1:length(mixtures_gestures))){
 
 }
 
-
+#use 75% as train set and 25% as test set
 set.seed(1)
 idx.tr <- sample(1:dim(mix_rms_dt_new_baseline)[1], round(dim(mix_rms_dt_new_baseline)[1]*.75), replace=F)
-#idx.tr
-tr <- mix_rms_dt_new_baseline[idx.tr]
-te <- mix_rms_dt_new_baseline[-idx.tr]
 
+#######1st classification problem
+tr <- mix_rms_dt_new_baseline[idx.tr]	#train set
+te <- mix_rms_dt_new_baseline[-idx.tr]	#test set
+
+#class 0 and class 1 as a unitary class
 for (i in c(1:dim(tr)[1])){
 	if (tr[i]$class == 0){
 		tr[i]$class = 1
@@ -167,21 +172,23 @@ for (i in c(1:dim(te)[1])){
 	}
 }
 
+#multinomial logistic regression 
 library(nnet)
 glmfit <- multinom(class ~ mean_rms, data = tr, maxit = 500)
 
 a <- predict(glmfit, te[,1])
 a <- list(a)
-mean((a) == te[,2])
+mean((a) == te[,2])	#accuracy
 table(factor(a[[1]], levels=min(0):max(7)), 
-			factor(te$class, levels=min(0):max(7)))
+			factor(te$class, levels=min(0):max(7)))	#confusion matrix
 
 
 
-
+########2nd classfiication problem
 tr <- mix_rms_dt_new_baseline[idx.tr]
 te <- mix_rms_dt_new_baseline[-idx.tr]
 
+#class 0 and class 1 as a unitary class
 for (i in c(1:dim(tr)[1])){
 	if (tr[i]$class == 0){
 		tr[i]$class = 1
@@ -194,24 +201,27 @@ for (i in c(1:dim(te)[1])){
 	}
 }
 
+#classification problem without "no gesture"
 tr <- tr[tr$class != 1]
 te <- te[te$class != 1]
 
+#multinomial logistic regression 
 library(nnet)
 glmfit <- multinom(class ~ mean_rms, data = tr, maxit = 500)
 
 a <- predict(glmfit, te[,1])
 a <- list(a)
-mean((a) == te[,2])
+mean((a) == te[,2])	#accuracy
 table(factor(a[[1]], levels=min(0):max(7)), 
-			factor(te$class, levels=min(0):max(7)))
+			factor(te$class, levels=min(0):max(7)))	#confusion matrxi
 
 
 
-
+########3rd classfiication problem
 tr <- mix_rms_dt_new_baseline[idx.tr]
 te <- mix_rms_dt_new_baseline[-idx.tr]
 
+#binary problem -> all gestures vs no gesture
 for (i in c(1:dim(tr)[1])){
 	if (tr[i]$class == 0){
 		tr[i]$class = 1
@@ -237,9 +247,9 @@ glmfit <- multinom(class ~ mean_rms, data = tr, maxit = 500)
 
 a <- predict(glmfit, te[,1])
 a <- list(a)
-mean((a) == te[,2])
+mean((a) == te[,2])	#accuracy
 table(factor(a[[1]], levels=min(1):max(2)), 
-			factor(te$class, levels=min(1):max(2)))
+			factor(te$class, levels=min(1):max(2)))	#confusion matrix
 
 ##################################################################################
 
@@ -247,27 +257,17 @@ ics_rms_dt <- data.table(rms1 = numeric(), rms2 = numeric(), rms3 = numeric(),
 												 rms4 = numeric(), rms5 = numeric(), rms6 = numeric(), 
 												 rms7 = numeric(), rms8 = numeric(), class = numeric())
 
-mixtures_rms_dt <- data.table(rms1 = numeric(), rms2 = numeric(), rms3 = numeric(), 
-												 rms4 = numeric(), rms5 = numeric(), rms6 = numeric(), 
-												 rms7 = numeric(), rms8 = numeric(), class = numeric())
-
 
 for (i in c(1:length(ics_gestures))){
 	
 	ics_record <-ics_gestures[[i]]
-	mixture_record <- mixtures_gestures[[i]]
 	new_record <- data.frame()
-	new_record_mix <- data.frame()
 
 	for (j in c(1:8)){
 		a <- paste("IC", j, sep = "")
 		rms <- sqrt((1/dim(ics_gestures[[i]])[1]) * sum(ics_gestures[[i]][,get(a)]^2, na.rm = TRUE))
 		new_record <- rbind(new_record, rms)
 		
-		
-		a <- paste("channel", j, sep = "")
-		rms_mix <- sqrt((1/dim(mixtures_gestures[[i]])[1]) * sum(mixtures_gestures[[i]][,get(a)]^2, na.rm = TRUE))
-		new_record_mix<- rbind(new_record_mix, rms_mix)
 	}
 	
 	new_record <- rbind(new_record, ics_gestures[[i]]$Class[1])
@@ -275,15 +275,11 @@ for (i in c(1:length(ics_gestures))){
 	row.names(new_record) <- i
 	ics_rms_dt <- rbind(ics_rms_dt, new_record, use.names = FALSE)
 	
-	
-	new_record_mix <- rbind(new_record_mix, mixtures_gestures[[i]]$class[1])
-	new_record_mix <- data.frame(t(new_record_mix))
-	rownames(new_record_mix) <- i
-	mixtures_rms_dt <- rbind(mixtures_rms_dt, new_record_mix, use.names = FALSE)
-	
 }
 
 
+####################################################
+#Bins method
 
 #install.packages("OneR")
 library(OneR)
@@ -297,7 +293,7 @@ bins.dt <- data.table("bin1" = numeric(), "bin2" = numeric(), "bin3" = numeric()
 											"class" = numeric() )
 
 dim(bins.dt)[2]
-
+#put rms values into bins
 for (k in c(1:dim(new_df)[1])){
 	vec <- vector("integer", dim(bins.dt)[2])
 	for (j in c(1:8)){
@@ -327,8 +323,11 @@ for (k in c(1:dim(new_df)[1])){
 bins_.dt <- bins.dt
 
 
+#Run the 3 classification problems with the same train and test set
 set.seed(1)
 idx.tr <- sample(1:length(ics_gestures), round(length(ics_gestures)*.75), replace=F)
+
+#1st classification problem - original problem
 tr <- bins_.dt[idx.tr]
 te <- bins_.dt[!idx.tr]
 
@@ -357,7 +356,7 @@ table(factor(a[[1]], levels=min(0):max(7)),
 
 
 
-
+#2nd classification problem (gestures only)
 tr <- bins_.dt[idx.tr]
 te <- bins_.dt[!idx.tr]
 
@@ -389,7 +388,7 @@ table(factor(a[[1]], levels=min(0):max(7)),
 
 
 
-
+#3rd classification problem (binary)
 tr <- bins_.dt[idx.tr]
 te <- bins_.dt[!idx.tr]
 

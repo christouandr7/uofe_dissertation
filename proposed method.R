@@ -3,6 +3,7 @@ library(readr)
 library(data.table)
 library(fastICA)
 
+#read data (mixtures)
 for (i in c(1:36)){
 	path <- paste("./EMG_data_for_gestures-master", i, "d1.txt", sep = "/")
 	print(path)
@@ -10,7 +11,7 @@ for (i in c(1:36)){
 }
 
 train <- patients_d1[c(1:36)]
-
+#plot mixtures
 par(mfrow = c(4,2))
 par(mar = c(2,2,2,2))
 for (i in c(1:8)){
@@ -18,6 +19,7 @@ for (i in c(1:8)){
 	plot(x = patients_d1[[3]]$time, y = patients_d1[[3]][[a]], type = "l")
 }
 
+#run fastica on mixtures and get independent components
 train <- patients_d1[c(1:36)]
 train_ics_original <- vector("list", length = 36)
 
@@ -34,7 +36,7 @@ for (i in c(1:36)){
 
 }
 
-
+#plots
 for (i in c(1:8)){
 	a <- paste("channel", i, sep = "")
 	plot(x = patients_d1[[3]]$time, y = patients_d1[[3]][[a]], type = "l")
@@ -50,11 +52,12 @@ train_ics_original_permuted <- vector("list", 36)
 
 for (i in c(1:36)){
 
-	a <- cor(train[[i]], train_ics_original[[i]])
-	zdf <- as.data.table(as.table(abs(a)))
-	zdf <- zdf[order(-rank(N))][1:8]
+	a <- cor(train[[i]], train_ics_original[[i]])	#correlation matrix between mixtures and ics
+	zdf <- as.data.table(as.table(abs(a)))	#correlation matrix as datatable
+	zdf <- zdf[order(-rank(N))][1:8]	#order the correlation coefficients and take the 8 highest
 	zdf
 	
+	#create the permutation matrix using the matching from above 
 	permutation_matrix <- matrix(0, nrow = 8, ncol = 8)
 	for (j in c(1:8)){
 		original <- as.integer(substr(zdf$V1[j], 8,8))
@@ -64,6 +67,7 @@ for (i in c(1:36)){
 	}
 	
 	
+	#order the signal based on the permutation matrix
 	train_ics_original_permuted[[i]] <- data.table(as.matrix(train_ics_original[[i]]) %*% permutation_matrix)
 	train_ics_original_permuted[[i]] <- cbind(train_ics_original_permuted[[i]], train[[i]]$time)
 	train_ics_original_permuted[[i]] <- cbind(train_ics_original_permuted[[i]], train[[i]]$class)
@@ -81,6 +85,10 @@ zdf
 a <- round(cor(train[[3]], train_ics_original_permuted[[3]]),3)
 a
 
+
+#initialize 2 lists - mixtures and ics will be splited into gestures
+#lists will contain the gestures
+#see when gesture label changes during the signal and define it as the end of the gesture
 mixtures_gestures <- vector("list",200)
 ics_gestures <- vector("list",200)
 s <- 0
@@ -108,14 +116,13 @@ for (i in c(1:length(train))){
 }
 
 
+#Windows method - use only the middle 50% of the signal
 length(ics_gestures)
 
 for (i in c(1:length(ics_gestures))){
-	#if (ics_gestures[[i]]$Class[1] == 0){
 	b <- trunc((dim(ics_gestures[[i]])[1]*.25))
 	c <- trunc((dim(ics_gestures[[i]])[1]*.75))
 	ics_gestures[[i]] <- ics_gestures[[i]][b:c]
-	#}
 }
 
 
@@ -124,10 +131,6 @@ for (i in c(1:length(ics_gestures))){
 ics_rms_dt <- data.table(rms1 = numeric(), rms2 = numeric(), rms3 = numeric(), 
 												 rms4 = numeric(), rms5 = numeric(), rms6 = numeric(), 
 												 rms7 = numeric(), rms8 = numeric(), class = numeric())
-
-mixtures_rms_dt <- data.table(rms1 = numeric(), rms2 = numeric(), rms3 = numeric(), 
-															rms4 = numeric(), rms5 = numeric(), rms6 = numeric(), 
-															rms7 = numeric(), rms8 = numeric(), class = numeric())
 
 
 for (i in c(1:length(ics_gestures))){
@@ -142,30 +145,21 @@ for (i in c(1:length(ics_gestures))){
 		rms <- sqrt((1/dim(ics_gestures[[i]])[1]) * sum(ics_gestures[[i]][,get(a)]^2, na.rm = TRUE))
 		new_record <- rbind(new_record, rms)
 		
-		
-		a <- paste("channel", j, sep = "")
-		rms_mix <- sqrt((1/dim(mixtures_gestures[[i]])[1]) * sum(mixtures_gestures[[i]][,get(a)]^2, na.rm = TRUE))
-		new_record_mix<- rbind(new_record_mix, rms_mix)
 	}
 	
 	new_record <- rbind(new_record, ics_gestures[[i]]$Class[1])
 	new_record <- data.frame(t(new_record))
 	row.names(new_record) <- i
 	ics_rms_dt <- rbind(ics_rms_dt, new_record, use.names = FALSE)
-	
-	
-	new_record_mix <- rbind(new_record_mix, mixtures_gestures[[i]]$class[1])
-	new_record_mix <- data.frame(t(new_record_mix))
-	rownames(new_record_mix) <- i
-	mixtures_rms_dt <- rbind(mixtures_rms_dt, new_record_mix, use.names = FALSE)
+
 	
 }
 
-
-
+#Run the 3 classification problems with the same train and test set
 set.seed(1)
 idx.tr <- sample(1:length(ics_gestures), round(length(ics_gestures)*.75), replace=F)
 
+#1st classification problem - original problem
 tr <- ics_rms_dt[idx.tr]
 te <- ics_rms_dt[!idx.tr]
 
@@ -194,7 +188,7 @@ table(factor(a[[1]], levels=min(0):max(7)),
 
 
 
-
+#2nd classification problem (gestures only)
 tr <- ics_rms_dt[idx.tr]
 te <- ics_rms_dt[!idx.tr]
 
@@ -227,7 +221,7 @@ table(factor(a[[1]], levels=min(0):max(7)),
 
 
 
-
+#3rd classification problem (binary)
 tr <- ics_rms_dt[idx.tr]
 te <- ics_rms_dt[!idx.tr]
 
